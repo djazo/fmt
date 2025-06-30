@@ -1,2 +1,2 @@
-option('header-only', type: boolean, value: false, description: 'enable header only mode and disable build for libfmt')
-option('unicode', type: boolean, value: true, description: 'enable unicode support')
+option('header-only', type: 'boolean', value: false, description: 'enable header only mode and disable build for libfmt')
+option('unicode', type: 'boolean', value: true, description: 'enable unicode support')
