@@ -1174,9 +1174,8 @@ FMT_CONSTEXPR20 FMT_INLINE void write2digits(Char* out, size_t value) {
   *out = static_cast<Char>('0' + value % 10);
 }
 
-// Formats a decimal unsigned integer value and writes to out pointing to a
-// buffer of specified size. The caller must ensure that the buffer is large
-// enough.
+// Formats a decimal unsigned integer value writing to out pointing to a buffer
+// of specified size. The caller must ensure that the buffer is large enough.
 template <typename Char, typename UInt>
 FMT_CONSTEXPR20 auto do_format_decimal(Char* out, UInt value, int size)
     -> Char* {
@@ -1345,7 +1344,7 @@ template <typename WChar, typename Buffer = memory_buffer> class to_utf8 {
 };
 
 // Computes 128-bit result of multiplication of two 64-bit unsigned integers.
-inline auto umul128(uint64_t x, uint64_t y) noexcept -> uint128_fallback {
+FMT_INLINE auto umul128(uint64_t x, uint64_t y) noexcept -> uint128_fallback {
 #if FMT_USE_INT128
   auto p = static_cast<uint128_opt>(x) * static_cast<uint128_opt>(y);
   return {static_cast<uint64_t>(p >> 64), static_cast<uint64_t>(p)};
@@ -1460,75 +1459,6 @@ template <typename T> struct decimal_fp {
 
 template <typename T> FMT_API auto to_decimal(T x) noexcept -> decimal_fp<T>;
 }  // namespace dragonbox
-
-// Compilers should be able to optimize this into the ror instruction.
-FMT_CONSTEXPR inline auto rotr(uint32_t n, uint32_t r) noexcept -> uint32_t {
-  r &= 31;
-  return (n >> r) | (n << (32 - r));
-}
-FMT_CONSTEXPR inline auto rotr(uint64_t n, uint32_t r) noexcept -> uint64_t {
-  r &= 63;
-  return (n >> r) | (n << (64 - r));
-}
-
-// Remove trailing zeros from n and return the number of zeros removed (float)
-FMT_INLINE int remove_trailing_zeros(uint32_t& n, int s = 0) noexcept {
-  FMT_ASSERT(n != 0, "");
-  // Modular inverse of 5 (mod 2^32): (mod_inv_5 * 5) mod 2^32 = 1.
-  constexpr uint32_t mod_inv_5 = 0xcccccccd;
-  constexpr uint32_t mod_inv_25 = 0xc28f5c29;  // = mod_inv_5 * mod_inv_5
-
-  while (true) {
-    auto q = rotr(n * mod_inv_25, 2);
-    if (q > max_value<uint32_t>() / 100) break;
-    n = q;
-    s += 2;
-  }
-  auto q = rotr(n * mod_inv_5, 1);
-  if (q <= max_value<uint32_t>() / 10) {
-    n = q;
-    s |= 1;
-  }
-  return s;
-}
-
-// Removes trailing zeros and returns the number of zeros removed (double)
-FMT_INLINE int remove_trailing_zeros(uint64_t& n) noexcept {
-  FMT_ASSERT(n != 0, "");
-
-  // This magic number is ceil(2^90 / 10^8).
-  constexpr uint64_t magic_number = 12379400392853802749ull;
-  auto nm = umul128(n, magic_number);
-
-  // Is n is divisible by 10^8?
-  if ((nm.high() & ((1ull << (90 - 64)) - 1)) == 0 && nm.low() < magic_number) {
-    // If yes, work with the quotient...
-    auto n32 = static_cast<uint32_t>(nm.high() >> (90 - 64));
-    // ... and use the 32 bit variant of the function
-    int s = remove_trailing_zeros(n32, 8);
-    n = n32;
-    return s;
-  }
-
-  // If n is not divisible by 10^8, work with n itself.
-  constexpr uint64_t mod_inv_5 = 0xcccccccccccccccd;
-  constexpr uint64_t mod_inv_25 = 0x8f5c28f5c28f5c29;  // mod_inv_5 * mod_inv_5
-
-  int s = 0;
-  while (true) {
-    auto q = rotr(n * mod_inv_25, 2);
-    if (q > max_value<uint64_t>() / 100) break;
-    n = q;
-    s += 2;
-  }
-  auto q = rotr(n * mod_inv_5, 1);
-  if (q <= max_value<uint64_t>() / 10) {
-    n = q;
-    s |= 1;
-  }
-
-  return s;
-}
 
 // Returns true iff Float has the implicit bit which is not stored.
 template <typename Float> constexpr auto has_implicit_bit() -> bool {
@@ -1688,6 +1618,15 @@ using convert_float_result =
 template <typename T>
 constexpr auto convert_float(T value) -> convert_float_result<T> {
   return static_cast<convert_float_result<T>>(value);
+}
+
+template <bool C, typename T, typename F, FMT_ENABLE_IF(C)>
+auto select(T true_value, F) -> T {
+  return true_value;
+}
+template <bool C, typename T, typename F, FMT_ENABLE_IF(!C)>
+auto select(T, F false_value) -> F {
+  return false_value;
 }
 
 template <typename Char, typename OutputIt>
@@ -3488,8 +3427,6 @@ FMT_CONSTEXPR20 auto write(OutputIt out, T value, format_specs specs,
     } else if (is_fast_float<T>::value && !is_constant_evaluated()) {
       // Use Dragonbox for the shortest format.
       auto dec = dragonbox::to_decimal(static_cast<fast_float_t<T>>(value));
-      if (dec.significand != 0)
-        dec.exponent += remove_trailing_zeros(dec.significand);
       return write_float<Char>(out, dec, specs, s, exp_upper, loc);
     }
   }
@@ -3533,69 +3470,48 @@ FMT_CONSTEXPR20 auto write(OutputIt out, T value) -> OutputIt {
 
   auto dec = dragonbox::to_decimal(static_cast<fast_float_t<T>>(value));
   auto significand = dec.significand;
-  auto exponent = dec.exponent;
-
-  uint32_t block1, block2 = 0;
-  int num_block2_digits = 0;
-  constexpr unsigned ten_pow_8 = 100000000u;
-  if (significand >= ten_pow_8) {
-    block1 = static_cast<unsigned>(significand / ten_pow_8);
-    block2 = static_cast<unsigned>(significand) - block1 * ten_pow_8;
-    if (block2 != 0) num_block2_digits = 8 - remove_trailing_zeros(block2);
-    exponent += 8;
-  } else {
-    block1 = static_cast<unsigned>(significand);
-  }
-  if (block2 == 0 && block1 != 0) exponent += remove_trailing_zeros(block1);
-
-  int num_block1_digits = count_digits(block1);
-  exponent += num_block1_digits - 1;
-  int significand_size = num_block1_digits + num_block2_digits;
-
+  int significand_size = count_digits(significand);
+  int exponent = dec.exponent + significand_size - 1;
   if (use_fixed(exponent, detail::exp_upper<T>())) {
-    if (dec.significand != 0)
-      dec.exponent += remove_trailing_zeros(dec.significand);
     return write_fixed<Char, fallback_digit_grouping<Char>>(
         out, dec, significand_size, Char('.'), {}, s);
   }
 
   // Write value in the exponential format.
+  const char* prefix = "e+";
+  int abs_exponent = exponent;
+  if (exponent < 0) {
+    abs_exponent = -exponent;
+    prefix = "e-";
+  }
   auto has_decimal_point = significand_size != 1;
-  size_t size =
-      to_unsigned((s != sign::none ? 1 : 0) + significand_size +
-                  (has_decimal_point ? 1 : 0) + compute_exp_size(exponent));
-
+  size_t size = std::is_pointer<OutputIt>::value
+                    ? 0u
+                    : to_unsigned((s != sign::none ? 1 : 0) + significand_size +
+                                  (has_decimal_point ? 1 : 0) +
+                                  (abs_exponent >= 100 ? 5 : 4));
   if (auto ptr = to_pointer<Char>(out, size)) {
     if (s != sign::none) *ptr++ = Char('-');
     if (has_decimal_point) {
       auto begin = ptr;
-      ptr = format_decimal<Char>(ptr, block1, num_block1_digits + 1);
+      ptr = format_decimal<Char>(ptr, significand, significand_size + 1);
       *begin = begin[1];
       begin[1] = '.';
-      if (num_block2_digits != 0) {
-        int n = num_block2_digits;
-        while (n > 2) {
-          n -= 2;
-          write2digits(ptr + n, block2 % 100);
-          block2 /= 100;
-        }
-        if (n > 1) {
-          n -= 2;
-          write2digits(ptr + n, block2);
-        } else {
-          ptr[--n] = static_cast<Char>('0' + block2);
-        }
-        ptr += num_block2_digits;
-      }
     } else {
-      *ptr++ = static_cast<Char>('0' + block1);
+      *ptr++ = static_cast<Char>('0' + significand);
     }
-    *ptr++ = Char('e');
-    ptr = write_exponent<Char>(exponent, ptr);
-    return out;
+    memcpy(ptr, prefix, 2);
+    ptr += 2;
+    if (abs_exponent >= 100) {
+      *ptr++ = static_cast<Char>('0' + abs_exponent / 100);
+      abs_exponent %= 100;
+    }
+    write2digits(ptr, static_cast<unsigned>(abs_exponent));
+    return select<std::is_pointer<OutputIt>::value>(ptr + 2, out);
   }
   auto it = reserve(out, size);
   if (s != sign::none) *it++ = Char('-');
+  // Insert a decimal point after the first digit and add an exponent.
   it = write_significand(it, significand, significand_size, 1,
                          has_decimal_point ? Char('.') : Char());
   *it++ = Char('e');
