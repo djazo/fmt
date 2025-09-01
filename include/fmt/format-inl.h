@@ -31,13 +31,53 @@
 #endif
 
 FMT_BEGIN_NAMESPACE
-namespace detail {
 
+#ifndef FMT_CUSTOM_ASSERT_FAIL
 FMT_FUNC void assert_fail(const char* file, int line, const char* message) {
   // Use unchecked std::fprintf to avoid triggering another assertion when
   // writing to stderr fails.
   fprintf(stderr, "%s:%d: assertion failed: %s", file, line, message);
   abort();
+}
+#endif
+
+#if FMT_USE_LOCALE
+namespace detail {
+using std::locale;
+using std::numpunct;
+using std::use_facet;
+}  // namespace detail
+
+template <typename Locale, enable_if_t<(sizeof(Locale::collate) != 0), int>>
+locale_ref::locale_ref(const Locale& loc) : locale_(&loc) {
+  static_assert(std::is_same<Locale, std::locale>::value, "");
+}
+#else
+namespace detail {
+struct locale {};
+template <typename Char> struct numpunct {
+  auto grouping() const -> std::string { return "\03"; }
+  auto thousands_sep() const -> Char { return ','; }
+  auto decimal_point() const -> Char { return '.'; }
+};
+template <typename Facet> Facet use_facet(locale) { return {}; }
+}  // namespace detail
+#endif  // FMT_USE_LOCALE
+
+template <typename Locale> auto locale_ref::get() const -> Locale {
+  using namespace detail;
+  static_assert(std::is_same<Locale, locale>::value, "");
+#if FMT_USE_LOCALE
+  if (locale_) return *static_cast<const locale*>(locale_);
+#endif
+  return locale();
+}
+
+namespace detail {
+
+// DEPRECATED!
+FMT_FUNC void assert_fail(const char* file, int line, const char* message) {
+  fmt::assert_fail(file, line, message);
 }
 
 FMT_FUNC void format_error_code(detail::buffer<char>& out, int error_code,
@@ -79,33 +119,6 @@ inline void fwrite_all(const void* ptr, size_t count, FILE* stream) {
     FMT_THROW(system_error(errno, FMT_STRING("cannot write to file")));
 }
 
-#if FMT_USE_LOCALE
-using std::locale;
-using std::numpunct;
-using std::use_facet;
-
-template <typename Locale>
-locale_ref::locale_ref(const Locale& loc) : locale_(&loc) {
-  static_assert(std::is_same<Locale, locale>::value, "");
-}
-#else
-struct locale {};
-template <typename Char> struct numpunct {
-  auto grouping() const -> std::string { return "\03"; }
-  auto thousands_sep() const -> Char { return ','; }
-  auto decimal_point() const -> Char { return '.'; }
-};
-template <typename Facet> Facet use_facet(locale) { return {}; }
-#endif  // FMT_USE_LOCALE
-
-template <typename Locale> auto locale_ref::get() const -> Locale {
-  static_assert(std::is_same<Locale, locale>::value, "");
-#if FMT_USE_LOCALE
-  if (locale_) return *static_cast<const locale*>(locale_);
-#endif
-  return locale();
-}
-
 template <typename Char>
 FMT_FUNC auto thousands_sep_impl(locale_ref loc) -> thousands_sep_result<Char> {
   auto&& facet = use_facet<numpunct<Char>>(loc.get<locale>());
@@ -133,18 +146,13 @@ FMT_FUNC auto write_loc(appender out, loc_value value,
 }  // namespace detail
 
 FMT_FUNC void report_error(const char* message) {
-#if FMT_USE_EXCEPTIONS
-  // Use FMT_THROW instead of throw to avoid bogus unreachable code warnings
-  // from MSVC.
-  FMT_THROW(format_error(message));
-#else
-  // Silence unreachable code warnings in MSVC.
+#if FMT_MSC_VERSION || defined(__NVCC__)
+  // Silence unreachable code warnings in MSVC and NVCC because these
+  // are nearly impossible to fix in a generic code.
   volatile bool b = true;
-  if (b) {
-    fputs(message, stderr);
-    abort();
-  }
+  if (!b) return;
 #endif
+  FMT_THROW(format_error(message));
 }
 
 template <typename Locale> typename Locale::id format_facet<Locale>::id;
@@ -1455,8 +1463,8 @@ FMT_FUNC void vformat_to(buffer<char>& buf, string_view fmt, format_args args,
   auto out = appender(buf);
   if (fmt.size() == 2 && equal2(fmt.data(), "{}"))
     return args.get(0).visit(default_arg_formatter<char>{out});
-  parse_format_string(
-      fmt, format_handler<char>{parse_context<char>(fmt), {out, args, loc}});
+  parse_format_string(fmt,
+                      format_handler<>{parse_context<>(fmt), {out, args, loc}});
 }
 
 template <typename T> struct span {
