@@ -558,22 +558,7 @@ marked with `FMT_COMPILE` or `_cf` are parsed, checked and converted into
 efficient formatting code at compile-time. This supports arguments of built-in
 and string types as well as user-defined types with `format` methods taking
 the format context type as a template parameter in their `formatter`
-specializations. For example:
-
-    template <> struct fmt::formatter<point> {
-      constexpr auto parse(format_parse_context& ctx);
-
-      template <typename FormatContext>
-      auto format(const point& p, FormatContext& ctx) const;
-    };
-
-Format string compilation can generate more binary code compared to the
-default API and is only recommended in places where formatting is a
-performance bottleneck.
-
-The same API supports formatting at compile time e.g. in `constexpr` functions.
-It works with built-in and user-defined formatters that have `constexpr` `parse`
-and `format` methods. Example ([run](https://www.godbolt.org/z/rzY8Tcjf8)):
+specializations. For example ([run](https://www.godbolt.org/z/3c13erEoq)):
 
     struct point {
       double x;
@@ -581,9 +566,30 @@ and `format` methods. Example ([run](https://www.godbolt.org/z/rzY8Tcjf8)):
     };
 
     template <> struct fmt::formatter<point> {
-      constexpr auto parse(format_parse_context& ctx) {
-        return ctx.begin();
+      constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+      template <typename FormatContext>
+      auto format(const point& p, FormatContext& ctx) const {
+        return format_to(ctx.out(), "({}, {})"_cf, p.x, p.y);
       }
+    };
+
+    using namespace fmt::literals;
+    std::string s = fmt::format("{}"_cf, point(4, 2));
+
+Format string compilation can generate more binary code compared to the
+default API and is only recommended in places where formatting is a
+performance bottleneck.
+
+The same APIs support formatting at compile time e.g. in `constexpr`
+and `consteval` functions. Additionally there is an experimental
+`FMT_STATIC_FORMAT` that allows formatting into a string of the exact
+required size at compile time. Compile-time formatting works with built-in
+and user-defined formatters that have `constexpr` `format` methods.
+Example:
+
+    template <> struct fmt::formatter<point> {
+      constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
 
       template <typename FormatContext>
       constexpr auto format(const point& p, FormatContext& ctx) const {
@@ -591,12 +597,14 @@ and `format` methods. Example ([run](https://www.godbolt.org/z/rzY8Tcjf8)):
       }
     };
 
-    using namespace fmt::literals;
-    constexpr std::string s = fmt::format("{}"_cf, point(1, 2));
+    constexpr auto s = FMT_STATIC_FORMAT("{}", point(4, 2));
+    const char* cstr = s.c_str(); // Points the static string "(4, 2)".
+
+::: operator""_cf
 
 ::: FMT_COMPILE
 
-::: operator""_cf
+::: FMT_STATIC_FORMAT
 
 <a id="color-api"></a>
 ## Terminal Colors and Text Styles

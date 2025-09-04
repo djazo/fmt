@@ -173,6 +173,12 @@ template <typename T> struct iterator_traits<fmt::basic_appender<T>> {
 #  define FMT_THROW(x) ::fmt::assert_fail(__FILE__, __LINE__, (x).what())
 #endif
 
+#ifdef __clang_analyzer__
+#  define FMT_CLANG_ANALYZER 1
+#else
+#  define FMT_CLANG_ANALYZER 0
+#endif
+
 // Defining FMT_REDUCE_INT_INSTANTIATIONS to 1, will reduce the number of
 // integer formatter template instantiations to just one by only using the
 // largest integer type. This results in a reduction in binary size but will
@@ -736,7 +742,7 @@ using is_double_double = bool_constant<std::numeric_limits<T>::digits == 106>;
 template <typename T> struct allocator : private std::decay<void> {
   using value_type = T;
 
-  T* allocate(size_t n) {
+  auto allocate(size_t n) -> T* {
     FMT_ASSERT(n <= max_value<size_t>() / sizeof(T), "");
     T* p = static_cast<T*>(std::malloc(n * sizeof(T)));
     if (!p) FMT_THROW(std::bad_alloc());
@@ -940,7 +946,7 @@ class string_buffer {
   inline string_buffer() : buf_(str_) {}
 
   inline operator writer() { return buf_; }
-  inline std::string& str() { return str_; }
+  inline auto str() -> std::string& { return str_; }
 };
 
 template <typename T, size_t SIZE, typename Allocator>
@@ -2622,7 +2628,7 @@ FMT_CONSTEXPR auto isfinite(T value) -> bool {
 }
 
 template <typename T, FMT_ENABLE_IF(is_floating_point<T>::value)>
-FMT_INLINE FMT_CONSTEXPR bool signbit(T value) {
+FMT_INLINE FMT_CONSTEXPR auto signbit(T value) -> bool {
   if (is_constant_evaluated()) {
 #ifdef __cpp_if_constexpr
     if constexpr (std::numeric_limits<double>::is_iec559) {
@@ -3698,9 +3704,9 @@ FMT_CONSTEXPR auto get_arg(Context& ctx, ID id) -> basic_format_arg<Context> {
 }
 
 template <typename Context>
-FMT_CONSTEXPR int get_dynamic_spec(
+FMT_CONSTEXPR auto get_dynamic_spec(
     arg_id_kind kind, const arg_ref<typename Context::char_type>& ref,
-    Context& ctx) {
+    Context& ctx) -> int {
   FMT_ASSERT(kind != arg_id_kind::none, "");
   auto arg =
       kind == arg_id_kind::index ? ctx.arg(ref.index) : ctx.arg(ref.name);
@@ -4213,21 +4219,26 @@ class format_int {
   inline auto str() const -> std::string { return {str_, size()}; }
 };
 
-#define FMT_STRING_IMPL(s, base)                                              \
-  [] {                                                                        \
-    /* Use the hidden visibility as a workaround for a GCC bug (#1973). */    \
-    /* Use a macro-like name to avoid shadowing warnings. */                  \
-    struct FMT_VISIBILITY("hidden") FMT_COMPILE_STRING : base {               \
-      using char_type = fmt::remove_cvref_t<decltype(s[0])>;                  \
-      constexpr explicit operator fmt::basic_string_view<char_type>() const { \
-        return fmt::detail::compile_string_to_view<char_type>(s);             \
-      }                                                                       \
-    };                                                                        \
-    using FMT_STRING_VIEW =                                                   \
-        fmt::basic_string_view<typename FMT_COMPILE_STRING::char_type>;       \
-    fmt::detail::ignore_unused(FMT_STRING_VIEW(FMT_COMPILE_STRING()));        \
-    return FMT_COMPILE_STRING();                                              \
-  }()
+#if FMT_CLANG_ANALYZER
+#  define FMT_STRING_IMPL(s, base) s
+#else
+#  define FMT_STRING_IMPL(s, base)                                           \
+    [] {                                                                     \
+      /* Use the hidden visibility as a workaround for a GCC bug (#1973). */ \
+      /* Use a macro-like name to avoid shadowing warnings. */               \
+      struct FMT_VISIBILITY("hidden") FMT_COMPILE_STRING : base {            \
+        using char_type = fmt::remove_cvref_t<decltype(s[0])>;               \
+        constexpr explicit operator fmt::basic_string_view<char_type>()      \
+            const {                                                          \
+          return fmt::detail::compile_string_to_view<char_type>(s);          \
+        }                                                                    \
+      };                                                                     \
+      using FMT_STRING_VIEW =                                                \
+          fmt::basic_string_view<typename FMT_COMPILE_STRING::char_type>;    \
+      fmt::detail::ignore_unused(FMT_STRING_VIEW(FMT_COMPILE_STRING()));     \
+      return FMT_COMPILE_STRING();                                           \
+    }()
+#endif  // FMT_CLANG_ANALYZER
 
 /**
  * Constructs a legacy compile-time format string from a string literal `s`.
