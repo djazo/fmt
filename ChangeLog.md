@@ -17,6 +17,27 @@
   (https://github.com/fmtlib/fmt/issues/3403,
   https://github.com/fmtlib/fmt/pull/4456). Thanks @msvetkin.
 
+- Added `FMT_STATIC_FORMAT` that allows formatting into a string of the exact
+  required size at compile time.
+
+  For example:
+
+  ```c++
+  #include <fmt/compile.h>
+
+  constexpr auto s = FMT_STATIC_FORMAT("{}", 42);
+  ```
+
+  compiles to just
+
+  ```s
+  __ZL1s:
+        .asciiz "42"
+  ```
+
+  It can be accessed as a C string with `s.c_str()` or as a string view with
+  `s.str()`.
+
 - Improved C++20 module support
   (https://github.com/fmtlib/fmt/pull/4451,
   https://github.com/fmtlib/fmt/pull/4459,
@@ -53,12 +74,17 @@
   formatters (https://github.com/fmtlib/fmt/issues/4424,
   https://github.com/fmtlib/fmt/pull/4434). Thanks @jeremy-rifkin.
 
-- Removed deprecated `basic_format_args::parse_context_type` and
-  `basic_format_args::formatter_type` and similar aliases in context types.
+- Removed the following deprecated APIs:
 
-- Removed deprecated `has_formatter`. Use `is_formattable` instead.
+  - `has_formatter`: use `is_formattable` instead,
+  - `basic_format_args::parse_context_type`,
+    `basic_format_args::formatter_type` and similar aliases in context types,
+  - wide stream overload of `fmt::printf`,
+  - wide stream overloads of `fmt::print` that take text styles,
+  - `is_*char` traits,
+  - `fmt::localtime`.
 
-- Removed legacy `is_*char` traits.
+- Deprecated wide overloads of `fmt::fprintf` and `fmt::sprintf`.
 
 - Improved diagnostics for the incorrect usage of `fmt::ptr`
   (https://github.com/fmtlib/fmt/pull/4453). Thanks @TobiSchluter.
@@ -99,19 +125,27 @@
   overriden by users when exceptions are disabled
   (https://github.com/fmtlib/fmt/pull/4521). Thanks @HazardyKnusperkeks.
 
-- Various code improvements (https://github.com/fmtlib/fmt/pull/4445,
+- Improved master project detection and disabled install targets when using
+  {fmt} as a subproject by default (https://github.com/fmtlib/fmt/pull/4536).
+  Thanks @crueter.
+
+- Made various code improvements
+  (https://github.com/fmtlib/fmt/pull/4445,
   https://github.com/fmtlib/fmt/pull/4448,
   https://github.com/fmtlib/fmt/pull/4473,
   https://github.com/fmtlib/fmt/pull/4522).
   Thanks @localspook, @tchaikov and @way4sahil.
 
+- Added Conan instructions to the docs
+  (https://github.com/fmtlib/fmt/pull/4537). Thanks @uilianries.
+
+- Removed Bazel files to avoid issues with downstream packaging
+  (https://github.com/fmtlib/fmt/pull/4530). Thanks @mering.
+
 - Added more entries for generated files to `.gitignore`
   (https://github.com/fmtlib/fmt/pull/4355,
   https://github.com/fmtlib/fmt/pull/4512).
   Thanks @dinomight and @localspook.
-
-- Removed Bazel files to avoid issues with downstream packaging
-  (https://github.com/fmtlib/fmt/pull/4530). Thanks @mering.
 
 - Fixed various warnings and compilation issues
   (https://github.com/fmtlib/fmt/pull/4447,
