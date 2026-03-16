@@ -1,60 +1,60 @@
-project('fmt',
-  'cpp',
-  version: '11.2.0',
-  license: 'MIT WITH fmt-exception',
-  default_options: ['cpp_std=c++14'])
+project(
+    'fmt',
+    'cpp',
+    version: '11.2.0',
+    license: 'MIT WITH fmt-exception',
+    default_options: ['cpp_std=c++14'],
+)
 
 fmt_private_cpp_args = []
 fmt_interface_cpp_args = []
 if get_option('default_library') == 'shared'
-  fmt_private_cpp_args += ['-DFMT_LIB_EXPORT']
-  fmt_interface_cpp_args += ['-DFMT_SHARED']
+    fmt_private_cpp_args += ['-DFMT_LIB_EXPORT']
+    fmt_interface_cpp_args += ['-DFMT_SHARED']
 endif
 
 header_only = get_option('header-only')
 unicode = get_option('unicode')
 
 if not unicode
-  fmt_unicode_cpp_args='-DFMT_UNICODE=0'
+    fmt_unicode_cpp_args = '-DFMT_UNICODE=0'
 else
-  fmt_unicode_cpp_args='-DFMT_UNICODE=1'
+    fmt_unicode_cpp_args = '-DFMT_UNICODE=1'
 endif
 
 if header_only
-  fmt_dep = declare_dependency(
-    include_directories: 'include',
-    compile_args: ['-DFMT_HEADER_ONLY']
+    fmt_dep = declare_dependency(
+        include_directories: 'include',
+        compile_args: ['-DFMT_HEADER_ONLY'],
     )
 else
-  fmt_lib = library(
-    'fmt',
-    'src/format.cc',
-    'src/os.cc',
-    cpp_args: [fmt_private_cpp_args, fmt_unicode_cpp_args],
-    include_directories: 'include',
-    build_by_default: not header_only,
-    install: not header_only,
-  )
-
-  install_subdir('include',
-    strip_directory: true,
-    install_dir: get_option('includedir'),
+    fmt_lib = library(
+        'fmt',
+        'src/format.cc',
+        'src/os.cc',
+        cpp_args: [fmt_private_cpp_args, fmt_unicode_cpp_args],
+        include_directories: 'include',
+        build_by_default: not header_only,
+        install: not header_only,
     )
 
-  fmt_dep = declare_dependency(
-    include_directories: 'include',
-    compile_args: [fmt_interface_cpp_args, fmt_unicode_cpp_args],
-    link_with: fmt_lib,
+    install_subdir(
+        'include',
+        strip_directory: true,
+        install_dir: get_option('includedir'),
     )
-  
-  pkg_mod = import('pkgconfig')
-  pkg_mod.generate(fmt_lib,
-    name: 'fmt',
-    filebase: 'fmt'
+
+    fmt_dep = declare_dependency(
+        include_directories: 'include',
+        compile_args: [fmt_interface_cpp_args, fmt_unicode_cpp_args],
+        link_with: fmt_lib,
     )
+
+    pkg_mod = import('pkgconfig')
+    pkg_mod.generate(fmt_lib, name: 'fmt', filebase: 'fmt')
 
 endif
 
 if meson.version().version_compare('>=0.54.0')
-  meson.override_dependency('fmt', fmt_dep)
+    meson.override_dependency('fmt', fmt_dep)
 endif
